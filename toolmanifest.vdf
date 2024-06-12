@@ -1,0 +1,5 @@
+"manifest"
+{
+  "commandline" "/gamescopelauncher run"
+  "commandline_waitforexitandrun" "/gamescopelauncher waitforexitandrun"
+}

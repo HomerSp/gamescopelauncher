@@ -1,0 +1,525 @@
+#!/bin/bash
+
+ARGS=("$@")
+if [ -n "${STEAM_COMPAT_CLIENT_INSTALL_PATH}" ]; then
+  LAUNCHERDIR="$(dirname "$(find "${STEAM_COMPAT_CLIENT_INSTALL_PATH}/compatibilitytools.d/" -name gamescopelauncher -type l)")"
+fi
+
+ISEVALUATOR=false
+if [[ "$2" == *"iscriptevaluator.exe"* ]]; then
+  ISEVALUATOR=true
+fi
+
+if [ -z "$STEAM_COMPAT_LIBRARY_PATHS" ]; then
+  echo "Empty library paths..."
+  exit 1
+fi
+
+if [ -z ${GSL_LOG+x} ]; then
+  GSL_LOG=0
+fi
+
+declare -A GSL_INT_ARGS
+
+function logDebug {
+  local msg="$@"
+  if [ $GSL_LOG -ne 0 ]; then
+    echo "gsl(debug): $@" >&2
+  fi
+}
+
+function logInfo {
+  local msg="$@"
+  echo "gsl: ${@}" >&2
+}
+
+function hasConfigItem {
+  local name="$1"
+  if [ ! -z "${GSL_INT_ARGS[$name]+x}" ]; then
+    logDebug "hasConfigItem $name"
+    return 0
+  else
+    logDebug "!hasConfigItem $name"
+    return 1
+  fi
+}
+
+function getConfigItem {
+  local name="$1"
+  if [ ! -z "${GSL_INT_ARGS[$name]+x}" ]; then
+    logDebug "getConfigItem $name = ${GSL_INT_ARGS[$name]}"
+    echo "${GSL_INT_ARGS[$name]}"
+  else
+    logDebug "getConfigItem $name not found"
+    echo ""
+  fi
+}
+
+function setConfigItem {
+  local name="$1"
+  local val="$2"
+  if [ -n "$val" -a "$#" -ge 2 ]; then
+    logDebug "setConfigItem $name = $value"
+    GSL_INT_ARGS[$name]="$val"
+  else
+    logDebug "setConfigItem removing $name"
+    unset GSL_INT_ARGS[$name]
+  fi
+}
+
+function parseGamescopeArgs {
+  while [ $# -gt 0 ]; do
+    name="$1"
+    value=""
+    case "$name" in
+      "-"* )
+        if [[ "$name" = "--"* ]]; then
+          IFS='=' read -r -a argarr <<< "$name"
+          if [[ "${#argarr[@]}" -gt 1 ]]; then
+            name="${argarr[0]}"
+            value="${argarr[1]}"
+          fi
+        fi
+
+        s=1;
+        if [ -z "$value" ]; then
+          if [[ "$#" -le 1 || "$2" = "-"* ]]; then
+            value=""
+          else
+            value="$2"
+            s=2;
+          fi
+        fi
+
+        GSL_INT_GAMESCOPE_ARGS["$name"]="$value"
+        shift $s;;
+      -- ) shift; break ;;
+      * ) break ;;
+    esac
+  done
+}
+
+function parseConfigLine {
+  local key="$1"
+  local value="$2"
+  if [[ "$key" == "proton_dir" ]]; then
+    setConfigItem "proton_dir" "$value"
+  elif [[ "$key" == "runtime_dir" ]]; then
+    setConfigItem "runtime_dir" "$value"
+  elif [[ "$key" == "proton_version" ]]; then
+    setConfigItem "proton_version" "$value"
+  elif [[ "$key" == "proton_experimental" ]]; then
+    setConfigItem "proton_experimental" $value
+  elif [[ "$key" == "gs_args" ]]; then
+    parseGamescopeArgs $value
+  elif [[ "$key" == "gs_args_del" ]]; then
+    if hasConfigItem "gs_args_del"; then
+      setConfigItem "gs_args_del" "$(getConfigItem "gs_args_del"),$value"
+    else
+      setConfigItem "gs_args_del" "$value"
+    fi
+  elif [[ "$key" == "gs_fullscreen" ]]; then
+    setConfigItem "gs_fullscreen" $value
+  elif [[ "$key" == "gs_display" ]]; then
+    setConfigItem "gs_display" $value
+  elif [[ "$key" == "gs_display_index" ]]; then
+    setConfigItem "gs_display_index" $value
+  elif [[ "$key" == "gs_output_width" ]]; then
+    setConfigItem "gs_output_width" $value
+  elif [[ "$key" == "gs_output_height" ]]; then
+    setConfigItem "gs_output_height" $value
+  elif [ "$key" == "gs_game_width" ]; then
+    setConfigItem "gs_game_width" $value
+  elif [ "$key" == "gs_game_height" ]; then
+    setConfigItem "gs_game_height" $value
+  elif [ "$key" == "gs_refresh_rate" ]; then
+    setConfigItem "gs_refresh_rate" $value
+  elif [[ "$key" == "gs_hdr_enabled" ]]; then
+    setConfigItem "gs_hdr_enabled" $value
+  elif [[ "$key" == "gs_filter" ]]; then
+    setConfigItem "gs_filter" $value
+  elif [[ "$key" == "gs_backend" ]]; then
+    setConfigItem "gs_backend" $value
+  else
+    logInfo "Unknown argument $key"
+  fi
+}
+
+function readConfigFile {
+  local path="$1"
+  if [ -f "$path" ]; then
+    logInfo "Reading config file ${path}"
+    while IFS="=" read key value; do
+      parseConfigLine "$key" "$value"
+    done < "$path"
+  else
+    logInfo "Config file ${path} not found, skipping..."
+  fi
+}
+
+function readConfigArgs {
+  local args
+  IFS=',' read -r -a args <<< "$1"
+  for line in "${args[@]}"; do
+    IFS='=' read -r -a keyvalue <<< "$line"
+    parseConfigLine "${keyvalue[@]}"
+  done
+}
+
+declare -A GSL_INT_GAMESCOPE_ARGS
+GSL_INT_DEL_GAMESCOPE_ARGS=()
+
+readConfigFile "/etc/gamescopelauncher/default.conf"
+readConfigFile "/etc/gamescopelauncher/app/${STEAM_COMPAT_APP_ID}.conf"
+readConfigFile "${HOME}/.config/gamescopelauncher/app/${STEAM_COMPAT_APP_ID}.conf"
+if [ -n "${GSL_ARGS}" ]; then
+  readConfigArgs "${GSL_ARGS}"
+fi
+
+if hasConfigItem "gs_display"; then
+  displayName="$(getConfigItem "gs_display")"
+  IFS=',' read -r -a display <<< $("${LAUNCHERDIR}/displayquery.py" query "${displayName}")
+  if [[ "${#display[@]}" -ge 6 ]]; then
+    logInfo "${displayName} = ${display[@]}"
+    setConfigItem "gs_display_index" ${display[2]}
+    setConfigItem "gs_display"
+
+    if [[ $(getConfigItem "gs_output_width") = "max" ]]; then
+      setConfigItem "gs_output_width" ${display[3]}
+    fi
+    if [[ $(getConfigItem "gs_output_height") = "max" ]]; then
+      setConfigItem "gs_output_height" ${display[4]}
+    fi
+    if [[ $(getConfigItem "gs_refresh_rate") = "max" ]]; then
+      setConfigItem "gs_refresh_rate" ${display[5]}
+    fi
+  else
+    logInfo "Could not find display with name ${displayName}, ignoring..."
+    setConfigItem "gs_display"
+  fi
+fi
+
+function getManifestKeyValue {
+  local file="$1"
+  local key="$2"
+  local val=($(grep "$key" "$file" | tr -d "\""))
+  if [ ${#val[@]} -ge 2 ]; then
+    for ((i=1; i < ${#val[@]}; i++)); do
+      if [[ $i > 1 ]]; then
+        echo -n " ";
+      fi
+      echo -n "${val[$i]}"
+    done
+    echo ""
+  fi
+}
+
+function findProton {
+  local libraryPath="$1"
+
+  if ! hasConfigItem "proton_dir"; then
+    forced_dir=0
+    declare -A versions
+    while read -r dir; do
+      arr=($(cat "$dir/version"))
+      if [ "${#arr[@]}" -ge 2 ]; then
+        version="${arr[0]}"
+        name="${arr[1]}"
+
+        if hasConfigItem "proton_version" ; then
+          pversion=$(getConfigItem "proton_version")
+          logDebug "$name - $pversion"
+          if [[ "$name" == *"$pversion"* ]]; then
+            logDebug "Found matching proton version $name"
+            forced_dir=1
+            setConfigItem "proton_dir" "$dir"
+            break
+          fi
+        fi
+
+        if [[ "$name" == "proton"* ]]; then
+          logDebug "adding proton $name"
+          versions[$version]="$dir"
+        elif [[ "$name" == "experimental"* ]]; then
+          if [[ $(getConfigItem "proton_experimental") == true ]]; then
+            logDebug "adding experimental $name"
+            versions[$version]="$dir"
+          fi
+        else
+          logDebug "ignoring ${dir}..."
+        fi
+      fi
+    done <<< "$(find "${libraryPath}/common" -maxdepth 1 -type d -exec sh -c '[ -f "$0"/proton ] && [ -f "$0"/version ] && [ -f "$0"/toolmanifest.vdf ]' '{}' \; -print)"
+
+    if [ $forced_dir -eq 0 ]; then
+      sorted=()
+      while read -r line; do
+        sorted+=("${versions[$line]}")
+      done < <(printf '%s\0' "${!versions[@]}" | sort -rz | xargs -0n1)
+
+      if [[ "${#sorted[@]}" > 0 ]]; then
+        setConfigItem "proton_dir" "${sorted[0]}"
+      fi
+    fi
+  fi
+
+  if hasConfigItem "proton_dir"; then
+    protonDir="$(getConfigItem "proton_dir")"
+    if [ -f "${protonDir}/proton" ]; then
+      GSL_INT_PROTON_LAUNCH="${protonDir}/proton"
+    fi
+  fi
+}
+
+function findRuntime {
+  local libraryPath="$1"
+  local verb="$2"
+  if ! hasConfigItem "runtime_dir"; then
+    appid="$(getManifestKeyValue "$(getConfigItem "proton_dir")/toolmanifest.vdf" "require_tool_appid")"
+    manifest="${libraryPath}/appmanifest_${appid}.acf"
+    if [ ! -f "$manifest" ]; then
+      logInfo "Manifest not found - $manifest"
+      exit 1
+    fi
+
+    installdirval=$(getManifestKeyValue "${manifest}" "installdir")
+    installDir="${libraryPath}/common/${installdirval}"
+    if [ -z "$installdirval" -o ! -d "$installDir" ]; then
+      logInfo "Install dir not found"
+      exit 1
+    fi
+
+    setConfigItem "runtime_dir" "$installDir"
+  fi
+
+  if hasConfigItem "runtime_dir"; then
+    runtimeDir="$(getConfigItem "runtime_dir")"
+    read -r -a cmdline <<< "$(getManifestKeyValue "${runtimeDir}/toolmanifest.vdf" "commandline")"
+    if [ ${#cmdline[@]} -gt 0 -a -f "${runtimeDir}/${cmdline[0]}" ]; then
+      GSL_INT_RUNTIME_LAUNCH=("${runtimeDir}${cmdline[0]}")
+      for ((i=1; i < ${#cmdline[@]}; i++)); do
+        l=${cmdline[$i]/"%verb%"/"${verb}"}
+        GSL_INT_RUNTIME_LAUNCH+=("${l}")
+      done
+    fi
+  fi
+}
+
+# Function to kill parent process and all children
+function killAll {
+  local parentpid=${1}
+  local children=$(pgrep -P ${parentpid})
+  if [ ${#children[@]} -gt 0 ]; then
+    for child in ${children[@]}; do
+      if [ -n "$child" ]; then
+        killAll ${child} true
+      fi
+    done
+  fi
+
+  # Kill the pid, but not ourself
+  if [ -n ${parentpid} -a ${parentpid} -ne $$ ]; then
+    logDebug "kill ${parentpid}"
+    kill ${parentpid}
+  fi
+}
+
+function launchEvaluator {
+  local args=("${@}")
+  local hascompatdata=false
+  env
+  findProton "${STEAM_COMPAT_LIBRARY_PATHS}"
+  if [ -z "${GSL_INT_PROTON_LAUNCH}" ]; then
+    logInfo "Could not find proton - ${GSL_INT_PROTON_LAUNCH}"
+    exit 1
+  fi
+
+  # Check if we need to upgrade/downgrade
+  if [ -f "${STEAM_COMPAT_DATA_PATH}/version" ]; then
+    local prefixversion="$(grep -Po 'CURRENT_PREFIX_VERSION="\K.*?(?=")' "${GSL_INT_PROTON_LAUNCH}")"
+    if grep -q "${prefixversion}" "${STEAM_COMPAT_DATA_PATH}/version"; then
+      hascompatdata=true
+    fi
+  fi
+
+  if [ $hascompatdata = false ]; then
+    CMDS=("${GSL_INT_PROTON_LAUNCH}" "${args[@]}")
+    logInfo "Running evaluator: ${CMDS[*]}"
+    "${CMDS[@]}"
+    ret=$?
+    exit $ret
+  fi
+
+  logInfo "Already have compatdata, nothing to do"
+  exit 0
+}
+
+function checkInvalidGamescopeArgs {
+  local output="$(gamescope --help 2>&1)"
+  local args=("backend" "display-index" "hdr-enabled")
+  for a in "${args[@]}"; do
+    if ! echo "$output" | grep -e "--${a}" >/dev/null; then
+      logInfo "gamescope: Removing unsupported ${a} option"
+      unset GSL_INT_GAMESCOPE_ARGS["--${a}"]
+    fi
+  done
+}
+
+function launchGamescope {
+  local args=("$@")
+  local verb="${args[0]}"
+  if [ -z "$verb" ]; then
+    logInfo "Could not find verb"
+    exit 1
+  fi
+
+  findProton "${STEAM_COMPAT_LIBRARY_PATHS}"
+  if [ -z "${#GSL_INT_PROTON_LAUNCH}" ]; then
+    logInfo "Could not find proton - ${GSL_INT_PROTON_LAUNCH}"
+    exit 1
+  fi
+
+  logInfo "Using proton launch parameters: ${GSL_INT_PROTON_LAUNCH}"
+
+  findRuntime "${STEAM_COMPAT_LIBRARY_PATHS}" "${verb}"
+  if [ "${#GSL_INT_RUNTIME_LAUNCH[@]}" -eq 0 ]; then
+    logInfo "Could not find runtime dir"
+    exit 1
+  fi
+
+  logInfo "Using runtime launch parameters: ${GSL_INT_RUNTIME_LAUNCH[*]}"
+
+  # Set gamescope arguments
+  if hasConfigItem "gs_fullscreen"; then
+    if [ $(getConfigItem "gs_fullscreen") = true ]; then
+      GSL_INT_GAMESCOPE_ARGS["-f"]=""
+    fi
+  fi
+  if hasConfigItem "gs_display_index"; then
+    GSL_INT_GAMESCOPE_ARGS["--display-index"]=$(getConfigItem "gs_display_index")
+  fi
+
+  if hasConfigItem "gs_output_width"; then
+    GSL_INT_GAMESCOPE_ARGS["-W"]=$(getConfigItem "gs_output_width")
+  fi
+  if hasConfigItem "gs_output_height"; then
+    GSL_INT_GAMESCOPE_ARGS["-H"]=$(getConfigItem "gs_output_height")
+  fi
+
+  if hasConfigItem "gs_game_width"; then
+    val=$(getConfigItem "gs_game_width")
+    if [ "$val" = "max" ]; then
+      GSL_INT_GAMESCOPE_ARGS["-w"]=${GSL_INT_GAMESCOPE_ARGS["-W"]}
+    else
+      GSL_INT_GAMESCOPE_ARGS["-w"]=$val
+    fi
+  fi
+
+  if hasConfigItem "gs_game_height"; then
+    val=$(getConfigItem "gs_game_height")
+    if [ "$val" = "max" ]; then
+      GSL_INT_GAMESCOPE_ARGS["-h"]=${GSL_INT_GAMESCOPE_ARGS["-H"]}
+    else
+      GSL_INT_GAMESCOPE_ARGS["-h"]=$val
+    fi
+  fi
+
+  if hasConfigItem "gs_refresh_rate"; then
+    GSL_INT_GAMESCOPE_ARGS["-r"]=$(getConfigItem "gs_refresh_rate")
+  fi
+
+  if hasConfigItem "gs_filter"; then
+    GSL_INT_GAMESCOPE_ARGS["-F"]=$(getConfigItem "gs_filter")
+  fi
+
+  if hasConfigItem "gs_hdr_enabled"; then
+    if [ "$(getConfigItem "gs_hdr_enabled")" = true ]; then
+      GSL_INT_GAMESCOPE_ARGS["--hdr-enabled"]=""
+    else
+      unset GSL_INT_ARGS["--hdr-enabled"]
+    fi
+  fi
+
+  if hasConfigItem "gs_backend"; then
+    GSL_INT_GAMESCOPE_ARGS["--backend"]=$(getConfigItem "gs_backend")
+  fi
+
+  if hasConfigItem "gs_args_del"; then
+    while IFS=',' read -ra name; do
+      if [ -n "$name" ]; then
+        logDebug "Delete gamescope arg $name"
+        unset GSL_INT_GAMESCOPE_ARGS[$name]
+      fi
+    done <<< $(getConfigItem "gs_args_del")
+  fi
+
+  checkInvalidGamescopeArgs
+
+  GSL_INT_GAMESCOPE_LAUNCH=("/usr/bin/gamescope")
+  for arg in "${!GSL_INT_GAMESCOPE_ARGS[@]}"; do
+    if [ "${GSL_INT_GAMESCOPE_ARGS[$arg]}" = "" ]; then
+      GSL_INT_GAMESCOPE_LAUNCH+=("$arg")
+    elif [ -n "${GSL_INT_GAMESCOPE_ARGS[$arg]}" ]; then
+      if [[ "$arg" = "--"* ]]; then
+        GSL_INT_GAMESCOPE_LAUNCH+=("${arg}=${GSL_INT_GAMESCOPE_ARGS[$arg]}")
+      else
+        GSL_INT_GAMESCOPE_LAUNCH+=("${arg}" "${GSL_INT_GAMESCOPE_ARGS[$arg]}")
+      fi
+    else
+      GSL_INT_GAMESCOPE_LAUNCH+=("$arg")
+    fi
+  done
+
+  logInfo "Using gamescope launch parameters: ${GSL_INT_GAMESCOPE_LAUNCH[*]}"
+
+  COMMANDS=("${GSL_INT_GAMESCOPE_LAUNCH[@]}" -- "${GSL_INT_RUNTIME_LAUNCH[@]}" "${GSL_INT_PROTON_LAUNCH}" "${args[@]}")
+
+  logInfo "Running"
+  logInfo "${COMMANDS[*]}"
+
+  output=$("${COMMANDS[@]}" 2>&1)
+  echo "output: ${output}"
+
+  # If we have crashed the reaper will still be running
+  reapername="$(dirname "${STEAM_RUNTIME}")"/reaper
+  pids=$(pgrep -x "reaper")
+  if [ "${#pids[@]}" -gt 0 ]; then
+    logInfo "We may have a crashed process, check if it matches"
+    for pid in "${pids[@]}"; do
+      if [ -z "${pid}" ]; then
+        continue
+      fi
+
+      if [ ! "$(readlink /proc/${pid}/exe)" = "$reapername" ]; then
+        logDebug "Ignoring ${pid}..."
+        continue
+      fi
+
+      cmdlines=($(cat /proc/${pid}/cmdline | strings -1))
+      if [ ${#cmdlines[@]} -gt 0 ]; then
+        found=false
+        for cmd in "${cmdlines[@]}"; do
+          logDebug "$cmd"
+          if [ "$cmd" = "AppId=${STEAM_COMPAT_APP_ID}" ]; then
+            found=true
+            break
+          fi
+        done
+
+        if [ $found = true ]; then
+          logInfo "Found matching reaper at ${pid}, killing subprocesses"
+          killAll ${pid}
+        fi
+      fi
+    done
+  fi
+
+  jobs -p
+}
+
+if [[ $ISEVALUATOR = true ]]; then
+  launchEvaluator "${ARGS[@]}"
+  exit $?
+else
+  launchGamescope "${ARGS[@]}"
+fi
