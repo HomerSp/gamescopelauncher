@@ -327,7 +327,6 @@ function killAll {
 function launchEvaluator {
   local args=("${@}")
   local hascompatdata=false
-  env
   findProton "${STEAM_COMPAT_LIBRARY_PATHS}"
   if [ -z "${GSL_INT_PROTON_LAUNCH}" ]; then
     logInfo "Could not find proton - ${GSL_INT_PROTON_LAUNCH}"
