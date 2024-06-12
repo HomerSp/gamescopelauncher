@@ -176,9 +176,16 @@ if [ -n "${GSL_ARGS}" ]; then
   readConfigArgs "${GSL_ARGS}"
 fi
 
-if hasConfigItem "gs_display"; then
-  displayName="$(getConfigItem "gs_display")"
-  IFS=',' read -r -a display <<< $("${LAUNCHERDIR}/displayquery.py" query "${displayName}")
+function queryDisplay {
+  local displayName="$(getConfigItem "gs_display")"
+  local lines
+  if ! lines="$("${LAUNCHERDIR}/displayquery.py" query "${displayName}")"; then
+    logInfo "displayquery failed"
+    exit 1
+  fi
+
+  local display
+  IFS=',' read -r -a display <<< "${lines}"
   if [[ "${#display[@]}" -ge 6 ]]; then
     logInfo "${displayName} = ${display[@]}"
     setConfigItem "gs_display_index" ${display[2]}
@@ -194,10 +201,20 @@ if hasConfigItem "gs_display"; then
       setConfigItem "gs_refresh_rate" ${display[5]}
     fi
   else
-    logInfo "Could not find display with name ${displayName}, ignoring..."
+    logInfo "Could not find display with name ${displayName}, this could be a problem"
+
     setConfigItem "gs_display"
+    if [[ $(getConfigItem "gs_output_width") = "max" ]]; then
+      setConfigItem "gs_output_width"
+    fi
+    if [[ $(getConfigItem "gs_output_height") = "max" ]]; then
+      setConfigItem "gs_output_height"
+    fi
+    if [[ $(getConfigItem "gs_refresh_rate") = "max" ]]; then
+      setConfigItem "gs_refresh_rate"
+    fi
   fi
-fi
+}
 
 function getManifestKeyValue {
   local file="$1"
@@ -370,6 +387,10 @@ function launchGamescope {
   if [ -z "$verb" ]; then
     logInfo "Could not find verb"
     exit 1
+  fi
+
+  if hasConfigItem "gs_display"; then
+    queryDisplay
   fi
 
   findProton "${STEAM_COMPAT_LIBRARY_PATHS}"
