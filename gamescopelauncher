@@ -381,6 +381,43 @@ function checkInvalidGamescopeArgs {
   done
 }
 
+function findAndKillReaper {
+  pids=$(pgrep -x "reaper")
+  if [ "${#pids[@]}" -gt 0 ]; then
+    reapername="$(dirname "${STEAM_RUNTIME}")"/reaper
+
+    logInfo "We may have a crashed process, check if it matches"
+    for pid in "${pids[@]}"; do
+      if [ -z "${pid}" ]; then
+        continue
+      fi
+
+      if [ ! "$(readlink /proc/${pid}/exe)" = "$reapername" ]; then
+        logDebug "Ignoring ${pid}..."
+        continue
+      fi
+
+      cmdlines=($(cat /proc/${pid}/cmdline | strings -1))
+      if [ ${#cmdlines[@]} -gt 0 ]; then
+        found=false
+        for cmd in "${cmdlines[@]}"; do
+          logDebug "$cmd"
+          if [ "$cmd" = "AppId=${STEAM_COMPAT_APP_ID}" ]; then
+            found=true
+            break
+          fi
+        done
+
+        if [ $found = true ]; then
+          logInfo "Found matching reaper at ${pid}, killing subprocesses"
+          killAll ${pid}
+        fi
+      fi
+    done
+  fi
+
+}
+
 function launchGamescope {
   local args=("$@")
   local verb="${args[0]}"
@@ -498,43 +535,7 @@ function launchGamescope {
   logInfo "${COMMANDS[*]}"
 
   output=$("${COMMANDS[@]}" 2>&1)
-  echo "output: ${output}"
-
-  # If we have crashed the reaper will still be running
-  reapername="$(dirname "${STEAM_RUNTIME}")"/reaper
-  pids=$(pgrep -x "reaper")
-  if [ "${#pids[@]}" -gt 0 ]; then
-    logInfo "We may have a crashed process, check if it matches"
-    for pid in "${pids[@]}"; do
-      if [ -z "${pid}" ]; then
-        continue
-      fi
-
-      if [ ! "$(readlink /proc/${pid}/exe)" = "$reapername" ]; then
-        logDebug "Ignoring ${pid}..."
-        continue
-      fi
-
-      cmdlines=($(cat /proc/${pid}/cmdline | strings -1))
-      if [ ${#cmdlines[@]} -gt 0 ]; then
-        found=false
-        for cmd in "${cmdlines[@]}"; do
-          logDebug "$cmd"
-          if [ "$cmd" = "AppId=${STEAM_COMPAT_APP_ID}" ]; then
-            found=true
-            break
-          fi
-        done
-
-        if [ $found = true ]; then
-          logInfo "Found matching reaper at ${pid}, killing subprocesses"
-          killAll ${pid}
-        fi
-      fi
-    done
-  fi
-
-  jobs -p
+  findAndKillReaper
 }
 
 if [[ $ISEVALUATOR = true ]]; then
