@@ -512,6 +512,14 @@ function launchGamescope {
 
   checkInvalidGamescopeArgs
 
+  # Backwards compatibility:
+  # If we have the backend option set to sdl, but gamescope doesn't support it, unset WAYLAND_DISPLAY to
+  # force SDL mode.
+  if [ "$(getConfigItem "gs_backend")" = "sdl" -a "${GSL_INT_GAMESCOPE_ARGS["--backend"]}" = "" ]; then
+    logInfo "Forcing SDL mode by unsetting WAYLAND_DISPLAY"
+    unset WAYLAND_DISPLAY
+  fi
+
   GSL_INT_GAMESCOPE_LAUNCH=("/usr/bin/gamescope")
   for arg in "${!GSL_INT_GAMESCOPE_ARGS[@]}"; do
     if [ "${GSL_INT_GAMESCOPE_ARGS[$arg]}" = "" ]; then
