@@ -149,7 +149,7 @@ function readConfigFile {
   local path="$1"
   if [ -f "$path" ]; then
     logInfo "Reading config file ${path}"
-    while IFS="=" read key value; do
+    while IFS="=" read key value || [ -n "$key" ]; do
       parseConfigLine "$key" "$value"
     done < "$path"
   else
