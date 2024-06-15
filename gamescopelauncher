@@ -24,13 +24,23 @@ declare -A GSL_INT_ARGS
 function logDebug {
   local msg="$@"
   if [ $GSL_LOG -ne 0 ]; then
-    echo "gsl(debug): $@" >&2
+    echo "gsl(debug): ${msg}" >&2
   fi
 }
 
 function logInfo {
   local msg="$@"
-  echo "gsl: ${@}" >&2
+  echo "gsl: ${msg}" >&2
+}
+
+function logWarning {
+  local msg="$@"
+  echo "gsl(warning): ${msg}" >&2
+}
+
+function logError {
+  local msg="$@"
+  echo "gsl(error): ${msg}" >&2
 }
 
 function hasConfigItem {
@@ -118,6 +128,8 @@ function parseConfigLine {
     else
       setConfigItem "gs_args_del" "$value"
     fi
+  elif [[ "$key" == "gs_gamescope" ]]; then
+    setConfigItem "gs_gamescope" $value
   elif [[ "$key" == "gs_fullscreen" ]]; then
     setConfigItem "gs_fullscreen" $value
   elif [[ "$key" == "gs_display" ]]; then
@@ -141,7 +153,7 @@ function parseConfigLine {
   elif [[ "$key" == "gs_backend" ]]; then
     setConfigItem "gs_backend" $value
   else
-    logInfo "Unknown argument $key"
+    logWarning "Unknown argument $key"
   fi
 }
 
@@ -153,7 +165,7 @@ function readConfigFile {
       parseConfigLine "$key" "$value"
     done < "$path"
   else
-    logInfo "Config file ${path} not found, skipping..."
+    logDebug "Config file ${path} not found, skipping..."
   fi
 }
 
@@ -180,14 +192,13 @@ function queryDisplay {
   local displayName="$(getConfigItem "gs_display")"
   local lines
   if ! lines="$("${LAUNCHERDIR}/displayquery.py" query "${displayName}")"; then
-    logInfo "displayquery failed"
+    logError "displayquery failed"
     exit 1
   fi
 
   local display
   IFS=',' read -r -a display <<< "${lines}"
   if [[ "${#display[@]}" -ge 6 ]]; then
-    logInfo "${displayName} = ${display[@]}"
     setConfigItem "gs_display_index" ${display[2]}
     setConfigItem "gs_display"
 
@@ -201,7 +212,7 @@ function queryDisplay {
       setConfigItem "gs_refresh_rate" ${display[5]}
     fi
   else
-    logInfo "Could not find display with name ${displayName}, this could be a problem"
+    logWarning "Could not find display with name ${displayName}, this could be a problem"
 
     setConfigItem "gs_display"
     if [[ $(getConfigItem "gs_output_width") = "max" ]]; then
@@ -295,14 +306,14 @@ function findRuntime {
     appid="$(getManifestKeyValue "$(getConfigItem "proton_dir")/toolmanifest.vdf" "require_tool_appid")"
     manifest="${libraryPath}/appmanifest_${appid}.acf"
     if [ ! -f "$manifest" ]; then
-      logInfo "Manifest not found - $manifest"
+      logError "Manifest not found - $manifest"
       exit 1
     fi
 
     installdirval=$(getManifestKeyValue "${manifest}" "installdir")
     installDir="${libraryPath}/common/${installdirval}"
     if [ -z "$installdirval" -o ! -d "$installDir" ]; then
-      logInfo "Install dir not found"
+      logError "Runtime install directory not found"
       exit 1
     fi
 
@@ -346,7 +357,7 @@ function launchEvaluator {
   local hascompatdata=false
   findProton "${STEAM_COMPAT_LIBRARY_PATHS}"
   if [ -z "${GSL_INT_PROTON_LAUNCH}" ]; then
-    logInfo "Could not find proton - ${GSL_INT_PROTON_LAUNCH}"
+    logError "Could not find proton - ${GSL_INT_PROTON_LAUNCH}"
     exit 1
   fi
 
@@ -360,7 +371,7 @@ function launchEvaluator {
 
   if [ $hascompatdata = false ]; then
     CMDS=("${GSL_INT_PROTON_LAUNCH}" "${args[@]}")
-    logInfo "Running evaluator: ${CMDS[*]}"
+    logDebug "Running evaluator: ${CMDS[*]}"
     "${CMDS[@]}"
     ret=$?
     exit $ret
@@ -371,11 +382,11 @@ function launchEvaluator {
 }
 
 function checkInvalidGamescopeArgs {
-  local output="$(gamescope --help 2>&1)"
+  local output="$("${1}" --help 2>&1)"
   local args=("backend" "display-index" "hdr-enabled")
   for a in "${args[@]}"; do
     if ! echo "$output" | grep -e "--${a}" >/dev/null; then
-      logInfo "gamescope: Removing unsupported ${a} option"
+      logInfo "Removing unsupported ${a} option"
       unset GSL_INT_GAMESCOPE_ARGS["--${a}"]
     fi
   done
@@ -422,7 +433,7 @@ function launchGamescope {
   local args=("$@")
   local verb="${args[0]}"
   if [ -z "$verb" ]; then
-    logInfo "Could not find verb"
+    logError "Could not find verb"
     exit 1
   fi
 
@@ -432,7 +443,7 @@ function launchGamescope {
 
   findProton "${STEAM_COMPAT_LIBRARY_PATHS}"
   if [ -z "${#GSL_INT_PROTON_LAUNCH}" ]; then
-    logInfo "Could not find proton - ${GSL_INT_PROTON_LAUNCH}"
+    logError "Could not find proton - ${GSL_INT_PROTON_LAUNCH}"
     exit 1
   fi
 
@@ -440,7 +451,7 @@ function launchGamescope {
 
   findRuntime "${STEAM_COMPAT_LIBRARY_PATHS}" "${verb}"
   if [ "${#GSL_INT_RUNTIME_LAUNCH[@]}" -eq 0 ]; then
-    logInfo "Could not find runtime dir"
+    logError "Could not find runtime directory"
     exit 1
   fi
 
@@ -510,7 +521,20 @@ function launchGamescope {
     done <<< $(getConfigItem "gs_args_del")
   fi
 
-  checkInvalidGamescopeArgs
+  local gamescopePathConfig
+  if hasConfigItem "gs_gamescope"; then
+    gamescopePathConfig="$(getConfigItem "gs_gamescope")"
+  else
+    gamescopePathConfig="gamescope"
+  fi
+
+  local gamescopePath="$(which "${gamescopePathConfig}" 2>/dev/null)"
+  if [ "$?" -ne 0 ]; then
+    logError "Failed to find gamescope (${gamescopePathConfig})!"
+    exit 1
+  fi
+
+  checkInvalidGamescopeArgs "${gamescopePath}"
 
   # Backwards compatibility:
   # If we have the backend option set to sdl, but gamescope doesn't support it, unset WAYLAND_DISPLAY to
@@ -520,7 +544,7 @@ function launchGamescope {
     unset WAYLAND_DISPLAY
   fi
 
-  GSL_INT_GAMESCOPE_LAUNCH=("/usr/bin/gamescope")
+  GSL_INT_GAMESCOPE_LAUNCH=("${gamescopePath}")
   for arg in "${!GSL_INT_GAMESCOPE_ARGS[@]}"; do
     if [ "${GSL_INT_GAMESCOPE_ARGS[$arg]}" = "" ]; then
       GSL_INT_GAMESCOPE_LAUNCH+=("$arg")
