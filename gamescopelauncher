@@ -534,7 +534,10 @@ function launchGamescope {
   logInfo "Running"
   logInfo "${COMMANDS[*]}"
 
-  output=$("${COMMANDS[@]}" 2>&1)
+  "${COMMANDS[@]}" &
+  pid=$!
+  logDebug "gamescope pid: ${pid}"
+  wait $pid
   findAndKillReaper
 }
 
