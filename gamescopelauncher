@@ -70,7 +70,16 @@ function setConfigItem {
   local val="$2"
   if [ -n "$val" -a "$#" -ge 2 ]; then
     logDebug "setConfigItem $name = $value"
-    GSL_INT_ARGS[$name]="$val"
+
+    if [[ "$#" > 2 && "$3" == true ]]; then
+      case "${val}"
+      in
+        false|FALSE|0) val=false;;
+        *) val=true;;
+      esac
+    fi
+
+    GSL_INT_ARGS[$name]="${val}"
   else
     logDebug "setConfigItem removing $name"
     unset GSL_INT_ARGS[$name]
@@ -119,7 +128,7 @@ function parseConfigLine {
   elif [[ "$key" == "proton_version" ]]; then
     setConfigItem "proton_version" "$value"
   elif [[ "$key" == "proton_experimental" ]]; then
-    setConfigItem "proton_experimental" $value
+    setConfigItem "proton_experimental" $value true
   elif [[ "$key" == "gs_args" ]]; then
     parseGamescopeArgs $value
   elif [[ "$key" == "gs_args_del" ]]; then
@@ -131,7 +140,7 @@ function parseConfigLine {
   elif [[ "$key" == "gs_gamescope" ]]; then
     setConfigItem "gs_gamescope" $value
   elif [[ "$key" == "gs_fullscreen" ]]; then
-    setConfigItem "gs_fullscreen" $value
+    setConfigItem "gs_fullscreen" $value true
   elif [[ "$key" == "gs_display" ]]; then
     setConfigItem "gs_display" $value
   elif [[ "$key" == "gs_display_index" ]]; then
@@ -147,11 +156,15 @@ function parseConfigLine {
   elif [ "$key" == "gs_refresh_rate" ]; then
     setConfigItem "gs_refresh_rate" $value
   elif [[ "$key" == "gs_hdr_enabled" ]]; then
-    setConfigItem "gs_hdr_enabled" $value
+    setConfigItem "gs_hdr_enabled" $value true
   elif [[ "$key" == "gs_filter" ]]; then
     setConfigItem "gs_filter" $value
   elif [[ "$key" == "gs_backend" ]]; then
     setConfigItem "gs_backend" $value
+  elif [[ "$key" == "gs_mangohud" ]]; then
+    setConfigItem "gs_mangohud" $value true
+  elif [[ "$key" == "gs_mangohud_config" ]]; then
+    setConfigItem "gs_mangohud_config" $value
   else
     logWarning "Unknown argument $key"
   fi
@@ -512,6 +525,16 @@ function launchGamescope {
     GSL_INT_GAMESCOPE_ARGS["--backend"]=$(getConfigItem "gs_backend")
   fi
 
+  if hasConfigItem "gs_mangohud"; then
+    if [ $(getConfigItem "gs_mangohud") = true ]; then
+      GSL_INT_GAMESCOPE_ARGS["--mangoapp"]=""
+    fi
+  fi
+
+  if hasConfigItem "gs_mangohud_config"; then
+    GSL_INT_MANGOHUD_CONFIG="$(getConfigItem "gs_mangohud_config")"
+  fi
+
   if hasConfigItem "gs_args_del"; then
     while IFS=',' read -ra name; do
       if [ -n "$name" ]; then
@@ -566,6 +589,7 @@ function launchGamescope {
   logInfo "Running"
   logInfo "${COMMANDS[*]}"
 
+  export MANGOHUD_CONFIG="${GSL_INT_MANGOHUD_CONFIG}"
   "${COMMANDS[@]}" &
   pid=$!
   logDebug "gamescope pid: ${pid}"
