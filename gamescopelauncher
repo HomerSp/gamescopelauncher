@@ -567,6 +567,10 @@ function launchGamescope {
     unset WAYLAND_DISPLAY
   fi
 
+  if [ -n "$GAMESCOPE_WAYLAND_DISPLAY" -a -n "${GSL_INT_GAMESCOPE_ARGS["--backend"]}" ]; then
+    unset GSL_INT_GAMESCOPE_ARGS["--backend"]
+  fi
+
   GSL_INT_GAMESCOPE_LAUNCH=("${gamescopePath}")
   for arg in "${!GSL_INT_GAMESCOPE_ARGS[@]}"; do
     if [ "${GSL_INT_GAMESCOPE_ARGS[$arg]}" = "" ]; then
