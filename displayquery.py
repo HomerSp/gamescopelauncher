@@ -32,20 +32,17 @@ def get_display_info(name):
         if not params.crtc:
            continue
 
-        if name != '':
-            if (name == 'primary' and primary.output != output) or (name != 'primary' and name != params.name):
-                continue
-
-        sdl = sdl_get_display_info(params.name)
-        crtc = d.xrandr_get_crtc_info(params.crtc, res.config_timestamp)
-        result.append({
-            'name': params.name,
-            'primary': primary.output == output,
-            'index': sdl['index'],
-            'width': crtc.width,
-            'height': crtc.height,
-            'refresh_rate': sdl['mode'].refresh_rate
-        })
+        if name == '' or ((name == 'primary' and (params.name == 'gamescope' or primary.output == output)) or name == params.name):
+            sdl = sdl_get_display_info(params.name)
+            crtc = d.xrandr_get_crtc_info(params.crtc, res.config_timestamp)
+            result.append({
+                'name': params.name,
+                'primary': primary.output == output,
+                'index': sdl['index'],
+                'width': crtc.width,
+                'height': crtc.height,
+                'refresh_rate': sdl['mode'].refresh_rate
+            })
 
     return result
 
