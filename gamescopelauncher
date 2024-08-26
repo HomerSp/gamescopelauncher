@@ -141,6 +141,10 @@ function parseConfigLine {
     setConfigItem "gs_gamescope" $value
   elif [[ "$key" == "gs_fullscreen" ]]; then
     setConfigItem "gs_fullscreen" $value true
+  elif [[ "$key" == "gs_borderless" ]]; then
+    setConfigItem "gs_borderless" $value true
+  elif [[ "$key" == "gs_immediate_flip" ]]; then
+    setConfigItem "gs_immediate_flip" $value true
   elif [[ "$key" == "gs_display" ]]; then
     setConfigItem "gs_display" $value
   elif [[ "$key" == "gs_display_index" ]]; then
@@ -165,6 +169,8 @@ function parseConfigLine {
     setConfigItem "gs_mangohud" $value true
   elif [[ "$key" == "gs_mangohud_config" ]]; then
     setConfigItem "gs_mangohud_config" $value
+  elif [[ "$key" == "gs_gamemode" ]]; then
+    setConfigItem "gs_gamemode" $value
   else
     logWarning "Unknown argument $key"
   fi
@@ -476,6 +482,17 @@ function launchGamescope {
       GSL_INT_GAMESCOPE_ARGS["-f"]=""
     fi
   fi
+  if hasConfigItem "gs_borderless"; then
+    if [ $(getConfigItem "gs_borderless") = true ]; then
+      GSL_INT_GAMESCOPE_ARGS["-b"]=""
+    fi
+  fi
+  if hasConfigItem "gs_immediate_flip"; then
+    if [ $(getConfigItem "gs_immediate_flip") = true ]; then
+      GSL_INT_GAMESCOPE_ARGS["--immediate-flips"]=""
+    fi
+  fi
+
   if hasConfigItem "gs_display_index"; then
     GSL_INT_GAMESCOPE_ARGS["--display-index"]=$(getConfigItem "gs_display_index")
   fi
@@ -571,7 +588,17 @@ function launchGamescope {
     unset GSL_INT_GAMESCOPE_ARGS["--backend"]
   fi
 
-  GSL_INT_GAMESCOPE_LAUNCH=("${gamescopePath}")
+  GSL_INT_GAMESCOPE_LAUNCH=()
+  if hasConfigItem "gs_gamemode"; then
+    if [ $(getConfigItem "gs_gamemode") = true ]; then
+      local gamemoderunPath="$(which "gamemoderun" 2>/dev/null)"
+      if [[ -n "${gamemoderunPath}" ]]; then
+        GSL_INT_GAMESCOPE_LAUNCH+=("${gamemoderunPath}")
+      fi
+    fi
+  fi
+
+  GSL_INT_GAMESCOPE_LAUNCH+=("${gamescopePath}")
   for arg in "${!GSL_INT_GAMESCOPE_ARGS[@]}"; do
     if [ "${GSL_INT_GAMESCOPE_ARGS[$arg]}" = "" ]; then
       GSL_INT_GAMESCOPE_LAUNCH+=("$arg")
